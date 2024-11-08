@@ -1,0 +1,174 @@
+# Environment variables with defaults
+IDRIS2_BOOT := env_var_or_default("IDRIS2_BOOT", "idris2")
+NAME := "idris2"
+TARGETDIR := join(justfile_directory(), "build/exec")
+TARGET := join(TARGETDIR, NAME)
+IDRIS2_CG := env_var_or_default("IDRIS2_CG", "chez")
+
+# Version information
+MAJOR := "0"
+MINOR := "7"
+PATCH := "0"
+VERSION := MAJOR + "." + MINOR + "." + PATCH
+
+# Git SHA handling
+GIT_SHA1 := `if git status >/dev/null 2>&1 && ! git describe --exact-match --tags >/dev/null 2>&1; then git rev-parse --short=9 HEAD; else echo ""; fi`
+VERSION_TAG := env_var_or_default("VERSION_TAG", GIT_SHA1)
+
+# Derived variables
+NAME_VERSION := NAME + "-" + VERSION
+IDRIS2_SUPPORT := if os() == "windows" { "libidris2_support.dll" } else { "libidris2_support.so" }
+IDRIS2_APP_IPKG := "idris2.ipkg"
+IDRIS2_LIB_IPKG := "idris2api.ipkg"
+
+# OS-specific settings
+IDRIS2_PREFIX := if os() == "windows" {
+    `cygpath -m {{PREFIX}}`
+} else {
+    PREFIX
+}
+
+IDRIS2_CURDIR := justfile_directory() # or use `invocation_directory`, which on windows uses `cygpath -m {{justfile_directory()}}`
+
+SEP := if os() == "windows" { ";" } else { ":" }
+LINK_SYMBOLIC_FILE_CMD := if os() == "windows" { "cp -rf" } else { "ln -sf" }
+
+# Support directories
+IDRIS2_SUPPORT_DIR := join(IDRIS2_CURDIR, "support/c")
+TEST_PREFIX := env_var_or_default("TEST_PREFIX", join(IDRIS2_CURDIR, "build/env"))
+TEST_IDRIS2_SUPPORT_DIR := join(TEST_PREFIX, NAME_VERSION)
+IDRIS2_BOOT_PREFIX := join(IDRIS2_CURDIR, "bootstrap-build")
+
+# Library paths
+_idris2_libraries := "prelude base linear network contrib test"
+_idris2_boot_path := ```
+    paths=()
+    for lib in {{_idris2_libraries}}; do
+        paths+=("{{IDRIS2_CURDIR}}/libs/${lib}/build/ttc")
+    done
+    IFS=':'
+    echo "${paths[*]}"
+```
+
+# Default installation variables
+DESTDIR := env_var_or_default('DESTDIR', '')
+PREFIX := env_var_or_default('PREFIX', '/usr/local')
+
+# Default recipe
+default: build
+
+# Main build recipes
+build: support generate-paths
+    {{IDRIS2_BOOT}} --build {{IDRIS2_APP_IPKG}}
+    cp {{IDRIS2_SUPPORT_DIR}}/{{IDRIS2_SUPPORT}} {{TARGETDIR}}/{{NAME}}_app/{{IDRIS2_SUPPORT}}
+
+# Path generation
+generate-paths:
+    echo "-- @generated" > src/IdrisPaths.idr
+    echo "module IdrisPaths" >> src/IdrisPaths.idr
+    echo "export idrisVersion : ((Nat,Nat,Nat), String); idrisVersion = (({{MAJOR}},{{MINOR}},{{PATCH}}), \"{{VERSION_TAG}}\")" >> src/IdrisPaths.idr
+    echo "export yprefix : String; yprefix=\"{{IDRIS2_PREFIX}}\"" >> src/IdrisPaths.idr
+
+# Library builds with parametrized recipe
+_build-lib lib:
+    cd libs/{{lib}} && IDRIS2_INC_CGS={{IDRIS2_CG}} IDRIS2_PATH={{_idris2_boot_path}} {{TARGET}} --build {{lib}}.ipkg
+
+prelude:
+    just _build-lib "prelude"
+
+base: prelude
+    just _build-lib "base"
+
+network: prelude linear
+    just _build-lib "network"
+
+contrib: base
+    just _build-lib "contrib"
+
+test-lib: contrib
+    just _build-lib "test"
+
+linear: prelude base
+    just _build-lib "linear"
+
+papers: contrib linear
+    just _build-lib "papers"
+
+# Combined library targets
+bootstrap-libs: prelude base linear network
+
+libs: prelude base contrib network test-lib linear papers
+
+# Documentation
+libdocs:
+    #!/usr/bin/env bash -euxo pipefail
+    for lib in prelude base contrib network test linear; do
+        cd libs/$lib && just docs IDRIS2={{TARGET}} IDRIS2_PATH={{_idris2_boot_path}}
+    done
+
+# Test environment setup
+setup-test-env: test-support
+    mkdir -p {{TEST_PREFIX}}/{{NAME_VERSION}}
+    {{LINK_SYMBOLIC_FILE_CMD}} {{IDRIS2_CURDIR}}/libs/prelude/build/ttc {{TEST_PREFIX}}/{{NAME_VERSION}}/prelude-{{VERSION}}
+    {{LINK_SYMBOLIC_FILE_CMD}} {{IDRIS2_CURDIR}}/libs/base/build/ttc {{TEST_PREFIX}}/{{NAME_VERSION}}/base-{{VERSION}}
+    {{LINK_SYMBOLIC_FILE_CMD}} {{IDRIS2_CURDIR}}/libs/linear/build/ttc {{TEST_PREFIX}}/{{NAME_VERSION}}/linear-{{VERSION}}
+    {{LINK_SYMBOLIC_FILE_CMD}} {{IDRIS2_CURDIR}}/libs/network/build/ttc {{TEST_PREFIX}}/{{NAME_VERSION}}/network-{{VERSION}}
+    {{LINK_SYMBOLIC_FILE_CMD}} {{IDRIS2_CURDIR}}/libs/contrib/build/ttc {{TEST_PREFIX}}/{{NAME_VERSION}}/contrib-{{VERSION}}
+    {{LINK_SYMBOLIC_FILE_CMD}} {{IDRIS2_CURDIR}}/libs/test/build/ttc {{TEST_PREFIX}}/{{NAME_VERSION}}/test-{{VERSION}}
+
+test-support:
+    cd support && just install PREFIX={{TEST_PREFIX}}
+
+# Testing recipes
+test: setup-test-env
+    @echo "NOTE: 'just test' does not rebuild Idris or the libraries packaged with it; to do that run 'just build'"
+    @if [ ! -x "{{TARGET}}" ]; then echo "ERROR: Missing IDRIS2 executable. Cannot run tests!\n"; exit 1; fi
+    cd tests && just IDRIS2={{TARGET}} IDRIS2_PREFIX={{TEST_PREFIX}} CPPFLAGS="${CPPFLAGS}" LDFLAGS="${LDFLAGS}"
+
+retest: setup-test-env
+    @echo "NOTE: 'just retest' does not rebuild Idris or the libraries packaged with it; to do that run 'just build'"
+    @if [ ! -x "{{TARGET}}" ]; then echo "ERROR: Missing IDRIS2 executable. Cannot run tests!\n"; exit 1; fi
+    cd tests && just retest IDRIS2={{TARGET}} IDRIS2_PREFIX={{TEST_PREFIX}}
+
+support:
+    cd support && just install
+
+# Cleaning
+clean-support:
+    find ./support -type f -regex ".*\.\(d\|o\|obj\|a\|lib\|so\|dylib\|dll\)" -delete
+    # cd support && just clean
+
+clean-libs:
+    #!/usr/bin/env bash -euxo pipefail
+    for lib in libs/*; do
+        rm -r "$lib/build"
+    done
+
+clean: clean-libs clean-support
+    {{IDRIS2_BOOT}} --clean {{IDRIS2_APP_IPKG}}
+    rm -f src/IdrisPaths.idr
+    cd tests && just clean
+    rm -rf build
+
+# Installation recipes
+install: install-idris2 install-support install-libs
+
+install-idris2:
+    mkdir -p {{DESTDIR}}{{PREFIX}}/bin/
+    install {{TARGET}} {{DESTDIR}}{{PREFIX}}/bin
+    if [ "{{os()}}" = "windows" ]; then install {{TARGET}}.cmd {{DESTDIR}}{{PREFIX}}/bin; fi
+    mkdir -p {{DESTDIR}}{{PREFIX}}/bin/{{NAME}}_app
+    install {{TARGETDIR}}/{{NAME}}_app/* {{DESTDIR}}{{PREFIX}}/bin/{{NAME}}_app
+
+install-support:
+    cd support && just install
+
+install-libs: install-bootstrap-libs
+    cd libs/contrib && just install IDRIS2={{TARGET}} IDRIS2_PATH={{_idris2_boot_path}} IDRIS2_INC_CGS={{IDRIS2_CG}}
+    cd libs/test && just install IDRIS2={{TARGET}} IDRIS2_PATH={{_idris2_boot_path}} IDRIS2_INC_CGS={{IDRIS2_CG}}
+
+install-bootstrap-libs:
+    #!/usr/bin/env bash -euxo pipefail
+    for lib in prelude base linear network;
+        do cd libs/$lib && just install IDRIS2={{TARGET}} IDRIS2_PATH={{_idris2_boot_path}} IDRIS2_INC_CGS={{IDRIS2_CG}};
+    done

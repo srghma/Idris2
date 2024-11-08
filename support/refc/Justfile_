@@ -1,0 +1,54 @@
+import '../../config.justfile'
+
+TARGET := "libidris2_refc"
+LIBTARGET := TARGET + ".a"
+
+# Get source files and generate object/dep files
+SRCS := `find . -name "*.c"`
+OBJS := replace(SRCS, ".c", ".o")
+DEPS := replace(OBJS, ".o", ".d")
+
+# Compiler flags
+CFLAGS := env_var_or_default("CFLAGS", "") + " -O2"
+CPPFLAGS := env_var_or_default("CPPFLAGS", "")
+
+# Add Windows flag if needed
+OLD_WIN := env_var_or_default("OLD_WIN", "0")
+CPPFLAGS := if OLD_WIN == "1" { CPPFLAGS + " -D_OLD_WIN" } else { CPPFLAGS }
+
+# Default recipe
+default: build
+
+# Build the library
+build: LIBTARGET
+
+[private]
+LIBTARGET: OBJS
+   {{RC}} {{LIBTARGET}} {{OBJS}}
+   {{RUNLIB}} {{LIBTARGET}}
+
+# Include dependency files
+# -include {{DEPS}}
+
+# Generate dependency files
+[private]
+generate-deps:
+    #!/usr/bin/env sh
+    for src in {{SRCS}}; do
+        obj=${src%.c}.o
+        dep=${src%.c}.d
+        cpp {{CPPFLAGS}} $src -MM -MT $obj > $dep
+    done
+
+# Clean compiled files
+clean:
+   rm -f {{OBJS}} {{LIBTARGET}}
+
+# Clean dependencies and compiled files
+cleandep: clean
+   rm -f {{DEPS}}
+
+# Install the library
+install: build
+   mkdir -p {{DESTDIR}}{{PREFIX}}/idris2-{{IDRIS2_VERSION}}/support/refc
+   install -m 644 {{LIBTARGET}} *.h {{DESTDIR}}{{PREFIX}}/idris2-{{IDRIS2_VERSION}}/support/refc

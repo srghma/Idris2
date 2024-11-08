@@ -1,4 +1,4 @@
-#!chezscheme
+#!/usr/bin/env chezscheme
 
 (define (blodwen-os)
   (case (machine-type)

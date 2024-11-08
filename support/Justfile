@@ -1,0 +1,60 @@
+# Get directory settings
+DESTDIR := env_var('DESTDIR)
+PREFIX := env_var('PREFIX')
+NAME_VERSION := env_var('NAME_VERSION')
+
+# Build recipes
+build: build-c build-refc build-chez
+
+build-c:
+   just -C c build
+
+build-refc:
+   just -C refc build
+
+build-chez:
+   just -C chez build
+
+# Clean recipes
+clean: clean-c clean-refc clean-chez
+
+clean-c:
+   just -C c cleandep
+
+clean-refc:
+   just -C refc cleandep
+
+clean-chez:
+   just -C chez clean
+
+# Install recipes
+install: install-docs install-racket install-gambit install-javascript install-node install-c install-refc install-chez
+
+install-docs:
+   mkdir -p {{DESTDIR}}{{PREFIX}}/{{NAME_VERSION}}/support/docs
+   install -m 644 docs/*.css {{DESTDIR}}{{PREFIX}}/{{NAME_VERSION}}/support/docs
+
+install-racket:
+   mkdir -p {{DESTDIR}}{{PREFIX}}/{{NAME_VERSION}}/support/racket
+   install -m 644 racket/* {{DESTDIR}}{{PREFIX}}/{{NAME_VERSION}}/support/racket
+
+install-gambit:
+   mkdir -p {{DESTDIR}}{{PREFIX}}/{{NAME_VERSION}}/support/gambit
+   install -m 644 gambit/* {{DESTDIR}}{{PREFIX}}/{{NAME_VERSION}}/support/gambit
+
+install-javascript:
+   mkdir -p {{DESTDIR}}{{PREFIX}}/{{NAME_VERSION}}/support/javascript
+   install -m 644 javascript/* {{DESTDIR}}{{PREFIX}}/{{NAME_VERSION}}/support/javascript
+
+install-node:
+   mkdir -p {{DESTDIR}}{{PREFIX}}/{{NAME_VERSION}}/support/node
+   install -m 644 node/* {{DESTDIR}}{{PREFIX}}/{{NAME_VERSION}}/support/node
+
+install-c:
+   just -C c install
+
+install-refc:
+   just -C refc install
+
+install-chez:
+   just -C chez install

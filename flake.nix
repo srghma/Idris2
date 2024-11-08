@@ -8,7 +8,13 @@
   };
   inputs.nixpkgs.url = "github:NixOS/nixpkgs";
 
-  outputs = { self, nixpkgs, flake-utils, idris-emacs-src }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+      idris-emacs-src,
+    }:
     let
       idris2Version = "0.7.0";
       lib = import ./nix/lib.nix;
@@ -23,31 +29,33 @@
         };
         defaultTemplate = templates.pkg;
         version = idris2Version;
-        overlays.default = final: prev:
+        overlays.default =
+          final: prev:
           let
-            outputPackages = prev.lib.filterAttrs
-              (n: _: n != "default" && n != "idris2Api")
-              self.packages.${prev.system};
+            outputPackages = prev.lib.filterAttrs (
+              n: _: n != "default" && n != "idris2Api"
+            ) self.packages.${prev.system};
             idris2Api = final.callPackage ./nix/idris2Api.nix {
               inherit (final.idris2Packages) buildIdris;
               inherit idris2Version;
             };
           in
-           {
-             idris2Packages = prev.idris2Packages // outputPackages // { inherit idris2Api; };
-             idris2 = final.idris2Packages.idris2;
-           };
+          {
+            # idris2Packages = prev.idris2Packages // outputPackages // { inherit idris2Api; };
+            # idris2 = final.idris2Packages.idris2;
+          };
       };
-      per-system = { config ? { }, overlays ? [ ] }:
+      per-system =
+        {
+          config ? { },
+          overlays ? [ ],
+        }:
         system:
         let
           pkgs = import nixpkgs { inherit config system overlays; };
-          chezSupportsSystem = (system == "x86_64-linux")
-            || (pkgs.lib.versionAtLeast pkgs.chez.version "10.0.0");
-          chez = if chezSupportsSystem then
-            pkgs.chez
-          else
-            pkgs.chez-racket;
+          chezSupportsSystem =
+            (system == "x86_64-linux") || (pkgs.lib.versionAtLeast pkgs.chez.version "10.0.0");
+          chez = if chezSupportsSystem then pkgs.chez else pkgs.chez-racket;
           idris2Support = pkgs.callPackage ./nix/support.nix { inherit idris2Version; };
           idris2Bootstrap = pkgs.callPackage ./nix/package.nix {
             inherit idris2Version chez;
@@ -65,30 +73,41 @@
             idris2 = idris2Pkg;
             support = idris2Support;
           };
-          idris2ApiPkg = pkgs.callPackage ./nix/idris2Api.nix {
-            inherit idris2Version buildIdris;
-          };
+          idris2ApiPkg = pkgs.callPackage ./nix/idris2Api.nix { inherit idris2Version buildIdris; };
           stdenv' = with pkgs; if stdenv.isDarwin then overrideSDK stdenv "11.0" else stdenv;
-        in {
+        in
+        {
           checks = import ./nix/test.nix {
-            inherit (pkgs) system stdenv runCommand lib;
+            inherit (pkgs)
+              system
+              stdenv
+              runCommand
+              lib
+              ;
             inherit nixpkgs flake-utils;
             idris = self;
           };
           packages = rec {
-            support = idris2Support;
-            idris2 = idris2Pkg;
-            idris2Api = idris2ApiPkg.library { withSource = true; };
-            default = idris2;
-          } // (import ./nix/text-editor.nix {
-            inherit pkgs idris-emacs-src idris2Pkg;
-          });
+            # support = idris2Support;
+            # idris2 = idris2Pkg;
+            # idris2Api = idris2ApiPkg.library { withSource = true; };
+            # default = idris2;
+          } // (import ./nix/text-editor.nix { inherit pkgs idris-emacs-src idris2Pkg; });
           inherit buildIdris;
+
+          formatter = pkgs.nixfmt-rfc-style;
+
           devShells.default = pkgs.mkShell.override { stdenv = stdenv'; } {
-            packages = [ idris2Pkg.buildInputs chez ];
-            SCHEME="scheme";
+            packages = [
+              # idris2Pkg.buildInputs
+              chez
+              pkgs.just
+              # pkgs.bazel
+              pkgs.buck2
+            ];
+            SCHEME = "scheme";
           };
         };
-    in lib.mkOvrOptsFlake
-    (opts: flake-utils.lib.eachDefaultSystem (per-system opts) // sys-agnostic);
+    in
+    lib.mkOvrOptsFlake (opts: flake-utils.lib.eachDefaultSystem (per-system opts) // sys-agnostic);
 }

@@ -1,0 +1,73 @@
+# Default configuration values
+DEFAULT_PREFIX := join(home_directory(), ".idris2")
+
+# Allow overriding PREFIX through environment variable
+PREFIX := env_var_or_default("PREFIX", DEFAULT_PREFIX)
+
+# Compiler tools with defaults
+RANLIB := env_var_or_default("RANLIB", "ranlib")
+AR := env_var_or_default("AR", "ar")
+CC := env_var_or_default("CC", "cc")
+
+# Get machine architecture and OS
+MACHINE := `{{CC}} -dumpmachine`
+
+# Determine OS and shared library suffix
+OS := ```
+if [[ {{MACHINE}} =~ cygwin|mingw|windows ]]; then
+    echo "windows"
+elif [[ {{MACHINE}} =~ darwin ]]; then
+    echo "darwin"
+elif [[ {{MACHINE}} =~ bsd ]]; then
+    echo "bsd"
+else
+    echo "linux"
+fi
+```
+
+SHLIB_SUFFIX := ```
+if [[ {{MACHINE}} =~ cygwin|mingw|windows ]]; then
+    echo ".dll"
+elif [[ {{MACHINE}} =~ darwin ]]; then
+    echo ".dylib"
+else
+    echo ".so"
+fi
+```
+
+# Base compiler flags
+export CFLAGS := "-Wall " + env_var_or_default("CFLAGS", "")
+export CPPFLAGS := env_var_or_default("CPPFLAGS", "")
+export LDFLAGS := env_var_or_default("LDFLAGS", "")
+
+# OS-specific configurations
+[unix]
+export CFLAGS := CFLAGS + " -fPIC"
+
+[macos]
+GMP_EXISTS := path_exists(env_var("HOMEBREW_PREFIX") + "/include/gmp.h")
+
+export CPPFLAGS := if GMP_EXISTS {
+    CPPFLAGS + " -I" + env_var("HOMEBREW_PREFIX") + "/include"
+} else {
+    CPPFLAGS
+}
+
+export LDFLAGS := if GMP_EXISTS {
+    LDFLAGS + " -L" + env_var("HOMEBREW_PREFIX") + "/lib"
+} else {
+    LDFLAGS
+}
+
+[linux]
+IS_BSD := `if [[ {{MACHINE}} =~ bsd ]]; then echo "yes"; else echo "no"; fi`
+
+export LOCALBASE := if IS_BSD == "yes" { `sysctl -n user.localbase` } else { "" }
+export CFLAGS := if IS_BSD == "yes" { CFLAGS + " -fPIC -I" + LOCALBASE + "/include" } else { CFLAGS }
+export LDFLAGS := if IS_BSD == "yes" { LDFLAGS + " -L" + LOCALBASE + "/lib" } else { LDFLAGS }
+
+[windows]
+export OLD_WIN := env_var_or_default("OLD_WIN", if `uname` =~ "NT-6.1" { "1" } else { "0" })
+
+# Allow custom overrides
+include? "config.local.justfile"
